@@ -1,0 +1,23 @@
+# Local Harness state and machine-specific configuration
+.dsh/
+
+# Dependencies and generated output
+node_modules/
+docs/preview-flow.html
+docs/*.png
+coverage/
+dist/
+build/
+.tmp/
+tmp/
+
+# Runtime and local files
+*.log
+*.tmp
+*.temp
+.env
+.env.*
+secrets/
+*.pem
+*.key
+id_rsa*

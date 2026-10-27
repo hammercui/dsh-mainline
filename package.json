@@ -1,0 +1,57 @@
+{
+  "name": "dsh-mainline",
+  "version": "0.4.0",
+  "private": true,
+  "description": "主线：只读的 roadmap 仪表盘。git-graph 式路线图展示宏观进度与当前位置，实时动作挂在当前任务下；偏离汇总在告警队列而不画进地图。不拦截、不改配置、不记时间。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "engines": {
+      "dsh": ">=0.2.0-rc.2"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "files": [
+    "lib/**/*.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "LICENSE",
+    "mainline.config.example.json",
+    "skills/**/*.md",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node scripts/smoke.mjs && node scripts/capabilities-test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hammercui/dsh-mainline.git"
+  },
+  "license": "MIT",
+  "icon": "icon.svg"
+}

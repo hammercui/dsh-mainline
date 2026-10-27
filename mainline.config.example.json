@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "project": "your-project",
+  "root": "D:/your/project",
+  "activeMilestone": "M1",
+  "activeTask": "M1-2",
+  "forbid": [
+    "**/.env",
+    "**/secrets/**",
+    "**/*.pem",
+    "**/id_rsa*"
+  ],
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "第一个里程碑",
+      "key": true,
+      "allow": [
+        "$WS/**",
+        "~/.dsh/**"
+      ],
+      "forbid": [
+        "$WS/prod/**"
+      ],
+      "tasks": [
+        {
+          "id": "M1-1",
+          "title": "已完成的任务",
+          "status": "done",
+          "acceptance": [
+            "验收条件写在数组里"
+          ]
+        },
+        {
+          "id": "M1-2",
+          "title": "正在做的任务（activeTask 指向它，面板上有脉冲标记）",
+          "acceptance": [
+            "不写 status 时，activeTask 指向的任务自动成为 doing"
+          ]
+        },
+        {
+          "id": "M1-3",
+          "title": "还没开始的任务",
+          "status": "todo"
+        }
+      ]
+    }
+  ]
+}
