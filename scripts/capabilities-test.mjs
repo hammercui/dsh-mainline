@@ -172,4 +172,18 @@ assert.equal(definition.stateSchema.safeParse({ ...before, catalog: [{ name: '..
 assert.equal(definition.wire.viewSchema.safeParse({ ...definition.wire.view(before), rows: [{ ...before.rows[0], description: 'x'.repeat(limits.description + 1) }] }).success, false)
 const frozenCatalog = Object.freeze({ ...before, rows: Object.freeze(before.rows.map(row => Object.freeze({ ...row }))), catalog: Object.freeze(before.catalog.map(item => Object.freeze({ ...item }))), pending: Object.freeze(before.pending.slice()) })
 assert.doesNotThrow(() => apply(frozenCatalog, catalog(10, [])))
-console.log('capabilities: pure-fold, catalog descriptions/replay/bounds and real Zod state/wire assertions passed')
+// Regression: hot updates must replace the old stylesheet rather than skip it.
+const { readFileSync } = await import('node:fs')
+const { runInNewContext } = await import('node:vm')
+const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+const cssStart = client.indexOf('    const STYLE_ID =')
+const cssEnd = client.indexOf('    const h = React.createElement', cssStart)
+const style = { textContent: 'old stylesheet' }
+runInNewContext(`${client.slice(cssStart, cssEnd)}; ensureStyle()`, {
+  document: { getElementById: () => style },
+})
+assert.ok(style.textContent.includes('.sd-cap-list { display: flex;'))
+assert.ok(style.textContent.includes('list-style: none'))
+assert.ok(style.textContent.includes('--dsw-alias-state-warn-primary'))
+assert.ok(client.includes("h('style', null, CSS_TEXT)"), 'capability component owns current styles')
+console.log('capabilities: projection/catalog/schema and stylesheet replacement assertions passed')
