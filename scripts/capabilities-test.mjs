@@ -60,7 +60,7 @@ const frozen = Object.freeze({ ...state, rows: Object.freeze(state.rows.map(Obje
 assert.doesNotThrow(() => apply(frozen, call(10, 'later')))
 // Validate real persisted and wire payloads with the package's installed Zod runtime.
 const definition = createCapabilitiesProjection(z)
-assert.equal(definition.stateVersion, 4)
+assert.equal(definition.stateVersion, 5)
 const wire = definition.wire.view(state)
 assert.notEqual(wire, state)
 assert.equal('pending' in wire, false)
@@ -262,6 +262,68 @@ for (const candidate of activityStates) {
 const immutablePreStart = Object.freeze({ ...preStart, rows: Object.freeze(preStart.rows.map(row => Object.freeze({ ...row }))), awaitingTurn: Object.freeze(preStart.awaitingTurn.slice()) })
 assert.doesNotThrow(() => apply(immutablePreStart, start(1, 9)))
 assert.equal(preStart.rows[0].loadedTurn, null)
+// Loaded text is an approximation, never per-skill billing. Include wrappers.
+const payload = '<skill_content name="office">abcd中文😀</skill_content>'
+const expectedTokens = Math.ceil((payload.length - 4) / 4 + 3) // emoji is two UTF-16 units, one code point
+const multiResult = result(1, 'tokens', null, payload)
+multiResult.data.message.content.push({ type: 'image', text: 'ignored private image' }, { type: 'text', text: 'abcd' })
+const tokenEvents = [call(0, 'tokens', 'skill', '{"name":"office","private":"do not estimate arguments"}'), multiResult,
+  { ...user, seq: 2, data: { ...user.data, content: [{ type: 'text', text: 'abcd中文😀' }] } },
+  call(3, 'failed'), result(4, 'failed', 'TOOL_TIMEOUT', payload),
+  call(5, 'repeat'), result(6, 'repeat', null, payload)]
+const tokens = fold(tokenEvents)
+assert.equal(fold(tokenEvents.slice(0, 2)).rows[0].latestLoadTokens, expectedTokens + 1, 'all text blocks, no image or argument text')
+assert.equal(fold(tokenEvents.slice(0, 3)).rows[0].latestLoadTokens, 4, 'mixed scripts counted by code point, not UTF-16 length')
+assert.equal(fold(tokenEvents.slice(0, 5)).rows[0].latestLoadTokens, 4, 'errors do not replace latest verified load')
+assert.equal(tokens.rows[0].latestLoadTokens, expectedTokens)
+assert.equal(tokens.rows[0].totalLoadTokens, expectedTokens * 2 + 5)
+assert.equal(tokens.rows[0].unknownLoads, 0)
+assert.equal(tokens.rows[0].latestLoadTokenStatus, 'complete')
+assert.equal(tokens.rows[0].tokenEstimateMethod, 'ascii-4-nonascii-1-v1')
+assert.equal(mcp.rows[0].tokenEstimateMethod, null)
+assert.equal(mcp.rows[0].totalLoadTokens, null)
+assert.equal(fold([user]).rows[0].latestLoadTokens, null, 'missing successful user payload is unknown')
+assert.equal(fold([user]).rows[0].unknownLoads, 1)
+const emptyUser = { ...user, data: { ...user.data, content: [{ type: 'text', text: '' }] } }
+assert.equal(fold([emptyUser]).rows[0].totalLoadTokens, null, 'empty is unknown, never zero')
+assert.equal(fold([call(0, 'empty'), result(1, 'empty', null, '')]).rows[0].latestLoadTokens, null)
+for (const error of ['TOOL_TIMEOUT', 'ABORTED', 'UNKNOWN_TOOL']) {
+  const errorRow = fold([call(0, 'error'), result(1, 'error', error, payload)]).rows[0]
+  assert.equal(errorRow.totalLoadTokens, null)
+  assert.equal(errorRow.unknownLoads, 0, 'failed calls are not unknown successful loads')
+}
+const userText = text => ({ ...user, data: { ...user.data, content: [{ type: 'text', text }] } })
+const exactBound = fold([userText('a'.repeat(limits.loadText))])
+assert.equal(exactBound.rows[0].latestLoadTokens, Math.ceil(limits.loadText / 4))
+const overBound = fold([userText('a'.repeat(limits.loadText + 1))])
+assert.equal(overBound.rows[0].latestLoadTokens, null)
+assert.equal(overBound.rows[0].totalLoadTokens, null)
+assert.equal(overBound.rows[0].latestLoadTokenStatus, 'truncated')
+assert.equal(overBound.rows[0].unknownLoads, 1)
+const overBlocks = result(1, 'oversize', null, payload)
+overBlocks.data.message.content.push({ type: 'text', text: 'a'.repeat(limits.loadText) })
+const boundedResult = fold([call(0, 'oversize'), overBlocks])
+assert.equal(boundedResult.rows[0].succeeded, 1)
+assert.equal(boundedResult.rows[0].latestLoadTokenStatus, 'truncated', 'aggregate all text-block lengths before counting')
+const manyBlocks = { ...user, data: { ...user.data, content: Array(limits.loadText + 1).fill({ type: 'image' }) } }
+assert.equal(fold([manyBlocks]).rows[0].latestLoadTokenStatus, 'truncated', 'block traversal also bounded')
+const unknownAfterKnown = apply(tokens, { ...emptyUser, seq: 7 })
+assert.equal(unknownAfterKnown.rows[0].latestLoadTokens, null)
+assert.equal(unknownAfterKnown.rows[0].totalLoadTokens, tokens.rows[0].totalLoadTokens, 'known sum survives unknown load; unknownLoads discloses incompleteness')
+assert.equal(unknownAfterKnown.rows[0].unknownLoads, 1)
+assert.equal(apply(tokens, catalog(7)).rows[0].totalLoadTokens, tokens.rows[0].totalLoadTokens, 'catalog not estimated')
+for (let split = 0; split <= tokenEvents.length; split++) {
+  assert.deepEqual(fold(tokenEvents.slice(split), JSON.parse(JSON.stringify(fold(tokenEvents.slice(0, split))))), tokens, 'token checkpoint replay')
+}
+for (const candidate of [tokens, exactBound, overBound, boundedResult, unknownAfterKnown, fold([emptyUser])]) {
+  assert.deepEqual(definition.stateSchema.parse(candidate), candidate)
+  const view = definition.wire.view(candidate)
+  assert.deepEqual(definition.wire.viewSchema.parse(view), view)
+  const serialized = JSON.stringify({ candidate, view })
+  for (const secret of [payload, 'do not estimate arguments', 'ignored private image', 'abcd中文😀', 'a'.repeat(100)]) assert.ok(!serialized.includes(secret), 'no loaded raw text persisted or on wire')
+}
+assert.equal(definition.stateSchema.safeParse({ ...tokens, rows: [{ ...tokens.rows[0], latestLoadTokens: -1 }] }).success, false)
+assert.equal(definition.stateSchema.safeParse({ ...tokens, rows: [{ ...tokens.rows[0], tokenEstimateMethod: 'actual-billing' }] }).success, false)
 // Regression: hot updates must replace the old stylesheet rather than skip it.
 const { readFileSync } = await import('node:fs')
 const { runInNewContext } = await import('node:vm')
