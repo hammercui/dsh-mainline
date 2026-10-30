@@ -60,7 +60,7 @@ const frozen = Object.freeze({ ...state, rows: Object.freeze(state.rows.map(Obje
 assert.doesNotThrow(() => apply(frozen, call(10, 'later')))
 // Validate real persisted and wire payloads with the package's installed Zod runtime.
 const definition = createCapabilitiesProjection(z)
-assert.equal(definition.stateVersion, 5)
+assert.equal(definition.stateVersion, 6)
 const wire = definition.wire.view(state)
 assert.notEqual(wire, state)
 assert.equal('pending' in wire, false)
@@ -362,4 +362,41 @@ assert.ok(style.textContent.includes('@media (prefers-reduced-motion: reduce)'))
 assert.ok(style.textContent.includes('animation: none; opacity: 1;'))
 const outOfOrder = fold([call(0, 'new', 'skill', undefined, 8), call(1, 'old', 'skill', undefined, 7), result(2, 'new', null, undefined, 8), result(3, 'old', null, undefined, 7)])
 assert.equal(outOfOrder.rows[0].loadedTurn, 8, 'late old-turn success never regresses latest load turn')
+// Latest successful delivery is its own event coordinate, not latest attempt/task.
+assert.equal(state.rows[0].loadSeq, 3)
+assert.equal(state.rows[0].loadSource, 'model')
+assert.equal(preStart.rows[0].loadSeq, 0)
+assert.equal(preStart.rows[0].loadSource, 'user')
+assert.equal(admitted.rows[0].loadSeq, 0, 'turn binding does not replace delivery seq')
+assert.equal(within.rows[0].loadSeq, 1)
+assert.equal(unknown.rows[0].loadSeq, 1, 'successful legacy result has seq even without turn')
+assert.equal(mcp.rows[0].loadSeq, null)
+assert.equal(mcp.rows[0].loadSource, null)
+assert.equal(failedOnly.rows[0].loadSeq, null)
+assert.equal(failedOnly.rows[0].loadSource, null)
+for (const retry of [...failedReloads, unverifiedReload, canceled, missingEnd]) {
+  assert.equal(retry.rows[0].loadSeq, retry === canceled || retry === missingEnd ? 6 : 3)
+  assert.equal(retry.rows[0].loadSource, 'model')
+}
+assert.equal(concurrentFailed.rows[0].loadSeq, 6, 'failure preserves most recent concurrent success')
+assert.equal(outOfOrder.rows[0].loadSeq, 3, 'seq records latest delivery even when known loadedTurn does not regress')
+assert.equal(tokens.rows[0].loadSeq, 6)
+assert.equal(tokens.rows[0].loadSource, 'model')
+assert.equal(unknownAfterKnown.rows[0].loadSeq, 7, 'unknown token estimate still delivered successfully')
+assert.equal(unknownAfterKnown.rows[0].loadSource, 'user')
+const userRetryEvents = [user, call(1, 'retry-user'), result(2, 'retry-user', 'TOOL_TIMEOUT')]
+const userRetry = fold(userRetryEvents)
+assert.equal(userRetry.rows[0].loadSeq, 0)
+assert.equal(userRetry.rows[0].loadSource, 'user')
+for (let split = 0; split <= userRetryEvents.length; split++) {
+  assert.deepEqual(fold(userRetryEvents.slice(split), JSON.parse(JSON.stringify(fold(userRetryEvents.slice(0, split))))), userRetry)
+}
+for (const schema of [definition.stateSchema, definition.wire.viewSchema]) {
+  const candidate = schema === definition.stateSchema ? userRetry : definition.wire.view(userRetry)
+  assert.deepEqual(schema.parse(candidate), candidate)
+  for (const loadSeq of [-1, 1.5, '0', Number.MAX_SAFE_INTEGER + 1]) assert.equal(schema.safeParse({ ...candidate, rows: [{ ...candidate.rows[0], loadSeq }] }).success, false)
+  assert.equal(schema.safeParse({ ...candidate, rows: [{ ...candidate.rows[0], loadSource: 'inferred' }] }).success, false)
+  const legacyRow = { ...candidate.rows[0] }; delete legacyRow.loadSeq; delete legacyRow.loadSource
+  assert.equal(schema.safeParse({ ...candidate, rows: [legacyRow] }).success, false, 'v6 requires explicit evidence fields')
+}
 console.log('capabilities: projection/catalog/schema, turn lifecycle/replay/concurrency/cancel, pure UI status and stylesheet assertions passed')
