@@ -1,6 +1,6 @@
 {
   "name": "dsh-mainline",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "private": true,
   "description": "主线：只读的 roadmap 仪表盘。git-graph 式路线图展示宏观进度与当前位置，实时动作挂在当前任务下；偏离汇总在告警队列而不画进地图。不拦截、不改配置、不记时间。",
   "type": "module",
